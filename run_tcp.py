@@ -52,17 +52,17 @@ if len(cmd) > 0:
 if (args.receiver):
     rtt = args.rtt
     cmd = {}
-    cmd["medium_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e4 && $10 * 1500 < 1e6) {print $8*1e6 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
+    cmd["medium_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e4 && $10 * 1500 < 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
 
-    cmd["medium_median"]= "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e4 && $10 * 1500 < 1e6) {print $8*1e6 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
+    cmd["medium_median"]= "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e4 && $10 * 1500 < 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
 
-    cmd["small_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 < 1e4) {print $8*1e6 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
+    cmd["small_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 < 1e4) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
 
-    cmd["small_median"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 < 1e4) {print $8*1e6 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
+    cmd["small_median"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 < 1e4) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
 
-    cmd["large_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e6) {print $8*1e6 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
+    cmd["large_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
 
-    cmd["large_median"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e6) {print $8*1e6 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
+    cmd["large_median"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
 
     val = {}
     for k in cmd:
@@ -71,6 +71,8 @@ if (args.receiver):
         #print pipedCommands
         proc = subprocess.Popen(v, stdout=subprocess.PIPE, shell=True)
         (out, err) = proc.communicate()
+        if (err is not None):
+            print ("error running " + str(cmd[k]))
         val[k] = out
         #print k, ": ", out
     
