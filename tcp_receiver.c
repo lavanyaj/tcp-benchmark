@@ -244,7 +244,7 @@ int main(int argc, char **argv) {
   uint32_t receive_duration;
   uint32_t port_num = PORT;
 
-  if (argc > 2) {
+  if (argc > 1) {
     sscanf(argv[1], "%u", &receive_duration);
     if (argc > 2) {
       sscanf(argv[2], "%u", &port_num);  // optional port number

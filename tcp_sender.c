@@ -326,7 +326,7 @@ int main(int argc, char **argv) {
 	}
 	if (argc <= 6) {
 		printf(
-				"usage: %s send_duration mean_t my_id dest_ip size_param num_flows port_num (optional)\n",
+				"usage: %s send_duration(s) mean_t(us) my_id(0..) dest_ip size_param(MTUs) num_flows port_num (optional)\n",
 				argv[0]);
 		return -1;
 	}
