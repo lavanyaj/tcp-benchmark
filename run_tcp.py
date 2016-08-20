@@ -13,7 +13,7 @@ parser.add_argument('--numFlows', type=float, default=10000)
 parser.add_argument('--sender', action='store_true')
 parser.add_argument('--receiver', action='store_true')
 
-parser.add_argument('--rtt', type=float, default=0.0001)
+parser.add_argument('--rtt', type=float, default=0)
 parser.add_argument('--tcpBenchmarkDir', type=str, default="/home/lavanyaj/tcp-benchmark")
 parser.add_argument('--percswitchDir', type=str, default="/home/lavanyaj/perc_switch")
 

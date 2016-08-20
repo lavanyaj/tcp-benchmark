@@ -112,7 +112,10 @@ void write_out_log(struct log *log) {
       for (int flowId = 0; flowId < MAX_FLOW_ID; flowId++) {
 	flow_info_t* fi = &(flows_from_sender[flowId]);
 	if (fi->num_times_received == 0) continue;
-	uint64_t fct = (fi->last_receive_time - fi->flow_start_time)*1e-3; // microseconds
+	uint64_t start = fi->send_time;
+	// when sender started sending after connection set up
+	// fi->flow_start_time;  when flow officially started
+	uint64_t fct = (fi->last_receive_time - start)*1e-3; // microseconds
 	uint64_t id = (i * 10000 + flowId);
 	uint64_t total_packets = ceil((1.0 * fi->total_bytes)/MTU_SIZE);
 	uint64_t received_packets = ceil((1.0) * fi->received_bytes)/MTU_SIZE;
