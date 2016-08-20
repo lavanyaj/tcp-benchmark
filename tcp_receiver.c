@@ -129,7 +129,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
     uint64_t time_diff;
     if (interval_end_time > time_now)
       time_diff = interval_end_time - time_now;
-    assert(time_diff < 1000 * 1000 * 1000);
+    assert(time_diff < 2 * 1000 * 1000 * 1000);
     timeout.tv_nsec = time_diff;
 
     int retval = pselect(max + 1, &rfds, NULL, NULL, &timeout, NULL);
