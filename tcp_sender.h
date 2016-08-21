@@ -19,11 +19,13 @@ struct tcp_sender {
   uint16_t port_num;
   uint64_t num_flows; // Number of flows to send
   const char *dest;
+  uint16_t src_port;
+  const char *src_ip;
 };
 
 // Inits a tcp sender.
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id,
-		     uint64_t duration, uint16_t port_num, const char *dest, uint64_t num_flows);
+		     uint64_t duration, uint16_t port_num, const char *dest, uint64_t num_flows, uint16_t src_port, const char* src_ip);
 
 // Runs one TCP sender with a persistent connection
 void run_tcp_sender_persistent(struct tcp_sender *sender);

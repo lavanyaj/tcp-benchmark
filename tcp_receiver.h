@@ -16,15 +16,13 @@ struct tcp_receiver {
   uint64_t start_time;
   uint64_t duration;  // How long to send for
   uint16_t port_num;
+  const char* ip_addr;
   struct log log;
 };
 
 // Inits a tcp receiver.
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
-		       uint16_t port_num);
-
-// Runs one TCP receiver with persistent connections
-void run_tcp_receiver_persistent(struct tcp_receiver *receiver);
+		       uint16_t port_num, const char *ip_addr);
 
 // Runs one TCP receiver with short-lived connections
 void run_tcp_receiver_short_lived(struct tcp_receiver *receiver);

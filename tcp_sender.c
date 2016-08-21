@@ -44,13 +44,15 @@ struct connection {
 
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
 		     uint32_t id, uint64_t duration, uint16_t port_num, const char *dest,
-		     uint64_t num_flows) {
+		     uint64_t num_flows, uint16_t src_port, const char* src_ip) {
 	sender->gen = gen;
 	sender->id = id;
 	sender->duration = duration;
 	sender->port_num = port_num;
 	sender->dest = dest;
 	sender->num_flows = num_flows;
+	sender->src_port = src_port;
+	sender->src_ip = src_ip;
 }
 
 // Selects the IP that corresponds to the receiver id
@@ -115,7 +117,7 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
 
 // Open a socket and connect (dst specified by sender).
 // Populate sock_fd with the descriptor and return the return value for connect
-int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd,
+int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd, int index,
 bool non_blocking) {
 	assert(sender != NULL);
 	
@@ -130,6 +132,21 @@ bool non_blocking) {
 		assert(result != -1);
 	}
 
+	if (sender->src_ip != NULL && sender->src_port != 0) {
+	  // bind socket to given IP address
+	  // Initialize socket address
+	  memset(&sock_addr, 0, sizeof(sock_addr));
+	  sock_addr.sin_family = AF_INET;
+	  sock_addr.sin_port = 0; //htons(sender->src_port+index);
+	  int  result = inet_pton(AF_INET, sender->src_ip, &sock_addr.sin_addr);
+	  assert(result > 0);
+	  result =
+	    bind(*sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr));
+	  assert(result != -1);
+	  printf("Bound source socket to %s:random_port\n",
+		 sender->src_ip);
+	}
+	
 	// Initialize destination address
 	memset(&sock_addr, 0, sizeof(sock_addr));
 	sock_addr.sin_family = AF_INET;
@@ -139,6 +156,7 @@ bool non_blocking) {
 	//char ip_addr[12];
 	//choose_IP(outgoing.receiver, ip_addr);
 	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
+	printf("connecting to %s:%u\n", sender->dest, sender->port_num);
 	result = inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr);
 	assert(result > 0);
 
@@ -224,7 +242,7 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 
 			// Connect to the receiver
 			connections[index].return_val = open_socket_and_connect(sender,
-					&connections[index].sock_fd,
+					&connections[index].sock_fd, index,
 					true);
 			if (connections[index].return_val < 0 && errno != EINPROGRESS) {
 				assert(current_time_nanoseconds() > end_time);
@@ -309,6 +327,8 @@ int main(int argc, char **argv) {
 	char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
 	if (!dest_ip)
 		return -1;
+	char *src_ip = NULL;	
+	uint32_t src_port = 0;
 	uint32_t size_param;
 	// short-lived/interactive (0), persistent/interactive (1), or persistent/bulk (2)
 
@@ -321,12 +341,22 @@ int main(int argc, char **argv) {
 		sscanf(argv[4], "%s", dest_ip);
 		sscanf(argv[5], "%u", &size_param);
 		sscanf(argv[6], "%u", &num_flows);
-		if (argc > 7)
-			sscanf(argv[8], "%u", &port_num);
+		if (argc > 7) {
+		  sscanf(argv[7], "%u", &port_num);
+		  if (argc > 8) {
+		    sscanf(argv[8], "%u", &src_port);
+		    if (argc > 9) {
+		      src_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+		      if (!src_ip)
+			return -1;
+		      sscanf(argv[9], "%s", src_ip);
+		    }
+		  }
+		}
 	}
 	if (argc <= 6) {
 		printf(
-				"usage: %s send_duration(s) mean_t(us) my_id(0..) dest_ip size_param(MTUs) num_flows port_num (optional)\n",
+				"usage: %s send_duration_s mean_t_us my_id_0 dest_ip size_param_mtu num_flows port_num src_port src_ip (last 3 optional)\n",
 				argv[0]);
 		return -1;
 	}
@@ -340,7 +370,7 @@ int main(int argc, char **argv) {
 	struct tcp_sender sender;
 	srand((uint32_t)(current_time_nanoseconds() + 0xDEADBEEF * my_id + 0xBABABABA * port_num));
 	gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, size_param);
-	tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip, num_flows);
+	tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip, num_flows, src_port, src_ip);
 
 	printf("Running interactive sender with short-lived connections\n");
 	printf("\tmy id: %u\n", my_id);

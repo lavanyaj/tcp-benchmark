@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <fcntl.h>
 
+#define IP_ADDR_MAX_LENGTH 20
 #define BITS_PER_BYTE 8
 #define NUM_INTERVALS 10  // should be at least 1 interval per second!!!
 #define MAX_BUFFER_SIZE (10000 * MTU_SIZE)
@@ -42,10 +43,11 @@ struct receiving_connection {
 };
 
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
-		       uint16_t port_num)
+		       uint16_t port_num, const char* ip_addr)
 {
   receiver->duration = duration;
   receiver->port_num = port_num;
+  receiver->ip_addr = ip_addr;
   init_log(&receiver->log, NUM_INTERVALS);
 }
 
@@ -64,12 +66,22 @@ int bind_and_listen_to_socket(struct tcp_receiver *receiver) {
   memset(&sock_addr, 0, sizeof(sock_addr));
   sock_addr.sin_family = AF_INET;
   sock_addr.sin_port = htons(receiver->port_num);
-  sock_addr.sin_addr.s_addr = htonl(INADDR_ANY);
- 
+  if (receiver->ip_addr != NULL) {
+    printf("Receiver IP address supplied %s\n", receiver->ip_addr);
+    int  result = inet_pton(AF_INET, receiver->ip_addr,
+			    &sock_addr.sin_addr);
+    assert(result > 0);
+  } else {
+    sock_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  } 
   // Bind the address to the socket
   int ret = bind(sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr));
   assert(ret != -1);
- 
+
+  if (receiver->ip_addr != NULL)
+    printf("Bound receiver socket to %s:%d\n" ,
+	   receiver->ip_addr, receiver->port_num);
+
   // Listen for incoming connections
   ret = listen(sock_fd, MAX_CONNECTIONS);
   assert(ret != -1);
@@ -244,14 +256,26 @@ int main(int argc, char **argv) {
   uint32_t receive_duration;
   uint32_t port_num = PORT;
 
+  char *ip_addr = NULL;
+  printf("Got %u arguments.\n", argc);
   if (argc > 1) {
     sscanf(argv[1], "%u", &receive_duration);
     if (argc > 2) {
       sscanf(argv[2], "%u", &port_num);  // optional port number
+      printf("Got port number %u\n", port_num);
+      if (argc > 3) {
+	ip_addr = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	if (!ip_addr)
+	  return -1;
+	sscanf(argv[3], "%s", ip_addr);  // optional ip address
+	printf("Got IP address %s\n", ip_addr);
+      }
     }
   }
+  
   if (argc <= 1) {
-    printf("usage: %s receive_duration port_num (optional)\n", argv[0]);
+    printf("usage: %s receive_duration port_num (optional) ip (optional)\n",
+	   argv[0]);
     return -1;
   }
 
@@ -259,6 +283,7 @@ int main(int argc, char **argv) {
 
   // Initialize the receiver
   struct tcp_receiver receiver;
-  tcp_receiver_init(&receiver, duration, port_num);
+  
+  tcp_receiver_init(&receiver, duration, port_num, ip_addr);
   run_tcp_receiver_short_lived(&receiver);
 }

@@ -1,3 +1,6 @@
+from tempfile import NamedTemporaryFile
+from multiprocessing import Pool
+import multiprocessing
 import subprocess
 import argparse
 import os
@@ -6,85 +9,174 @@ import time
 
 parser = argparse.ArgumentParser(description='Run Tcp sender/ receiver')
 
-parser.add_argument('--duration', type=int, help='seconds', default=5)
-parser.add_argument('--interArrivalTime', help='seconds', type=float, default=1)
-parser.add_argument('--size', type=float, help='(number of packets)', default=1)
-parser.add_argument('--numFlows', type=float, default=10000)
-parser.add_argument('--sender', action='store_true')
-parser.add_argument('--receiver', action='store_true')
+parser.add_argument('--receiverDuration', type=int, help='seconds', default=10)
+parser.add_argument('--senderDuration', type=int, help='seconds', default=5)
+parser.add_argument('--interArrivalTime', help='microseconds', type=float, default=10000)
+parser.add_argument('--size', type=int, help='MTUs', default=100)
+parser.add_argument('--numFlows', type=int, default=1000)
 
 parser.add_argument('--rtt', type=float, default=0)
 parser.add_argument('--tcpBenchmarkDir', type=str, default="/home/lavanyaj/tcp-benchmark")
 parser.add_argument('--percswitchDir', type=str, default="/home/lavanyaj/perc_switch")
 
+# single sender and receiver set up
+parser.add_argument('--single_from_ip', type=str, default="10.0.0.1")
+parser.add_argument('--single_from_port', type=int, default=500)
+parser.add_argument('--single_to_ip', type=str, default="10.0.0.2")
+parser.add_argument('--single_to_port', type=int, default=100)
+
+
 # not used yet
-parser.add_argument('--dstIp', type=str, default="10.0.0.2")
-parser.add_argument('--srcIp', type=str, default="10.0.0.1")
-parser.add_argument('--portNum', type=float, help='portNum', default=1)
-parser.add_argument('--custom', action='store_true')
 parser.add_argument('--scaling', type=float, default=1.0)
 
 args = parser.parse_args()
 
 
-id_ = 0
-cmd = ""
-tmpFile = "%s/out.txt"%args.tcpBenchmarkDir
-fctFile = "%s/demo/fct_file.csv"%args.percswitchDir
-
-if (args.sender):
+def get_sender_cmds(ip_addr_list):
+    tcp_sender_cmds = {}
     tcpSender = "%s/tcp_sender"%args.tcpBenchmarkDir
-    cmd = tcpSender + " " + str(args.duration) + " " + str(args.interArrivalTime) +\
-                            " " + str(id_) + " " + args.dstIp + " "\
-                            " " + str(args.size) + " " + str(args.numFlows)
-elif (args.receiver):
+    id_ = 0
+    for ip in ip_addr_list:
+        # sudo /home/lavanyaj/tcp-benchmark/tcp_sender 5 10000 0 10.0.0.2 10 100 100 500 10.0.0.1
+        sender_cmd = tcpSender +\
+                     " " + str(args.senderDuration) +\
+                     " " + str(args.interArrivalTime) +\
+                     " " + str(id_) +\
+                     " " + args.single_to_ip +\
+                     " " + str(args.size) +\
+                     " " + str(args.numFlows) +\
+                     " " + str(args.single_to_port) +\
+                     " " + str(args.single_from_port) +\
+                     " " + ip
+        tcp_sender_cmds[ip] = ("sender", ip, sender_cmd)
+        id_ = id_ + 1
+
+    return tcp_sender_cmds
+
+def get_receiver_cmds(ip_addr_list):
+    tcp_receiver_cmds = {}
     tcpReceiver = "%s/tcp_receiver"%args.tcpBenchmarkDir
-    cmd = tcpReceiver + " " + str(args.duration) + " > " + tmpFile
-else:
-    cmd = ""
-    
-print cmd
+    for ip in ip_addr_list:
+        receiver_cmd = tcpReceiver + " " + str(args.receiverDuration) +\
+                       " " + str(args.single_to_port) +\
+                       " " + ip
+        tcp_receiver_cmds[ip] = ("receiver", ip, receiver_cmd)
+    return tcp_receiver_cmds
 
-if len(cmd) > 0:
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+def get_stats_cmds():
+    filters = {}
+    filters["small"] = "$10 * 1500 < 1e4"
+    filters["medium"] = "$10 * 1500 >= 1e4 && $10 * 1500 < 1e6"
+    filters["large"] = "$10 * 1500 >= 1e6"
+
+    grep_fct = "grep fct"
+    print_fcts = lambda f: "awk '{ if (%s) {print $8 \" \" $10*1.2;}}'"%f
+    normalize = "awk '{print $1/$2;}'"
+    r_tail = "Rscript -e 'quantile (as.numeric (readLines (\"stdin\")),"\
+             + " probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'"
+    stats_cmds = {}
+    for size in filters:
+        cmd = "| ".join([grep_fct, print_fcts(filters[size]),\
+                         normalize, r_tail])
+        stats_cmds[size] = cmd
+    return stats_cmds
+
+def run_tcp(cmd):
+    (kind, ip, cmd) = cmd
+    prefix = "%s_%s_"%(kind, ip)
+    f = NamedTemporaryFile(prefix=prefix,delete=False)
+    e = NamedTemporaryFile(delete=False)
+    ret = subprocess.call(cmd.split(), stdout=f, stderr=e)
+    return "%d %s %s" % (ret, f.name, e.name)
+
+def run_stats(proc, input_file, input_err, cmd):
+    proc = subprocess.Popen(cmd,
+                            stdin = input_file,
+                            stdout= subprocess.PIPE)
     (out, err) = proc.communicate()
+    return (proc, out, err)
 
-if (args.receiver):
-    rtt = args.rtt
-    cmd = {}
-    cmd["medium_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e4 && $10 * 1500 < 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
+def run_tcp_processes(tcp_cmds):
+    # want to run TCP senders and receivers on different cores
+    count = multiprocessing.cpu_count()
+    assert(len(tcp_cmds) + 1 < count)
+    count = len(tcp_cmds)
+    pool = Pool(processes=count)
+    results = pool.map(run_tcp, tcp_cmds)
+    pool.close()
+    pool.join()
 
-    cmd["medium_median"]= "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e4 && $10 * 1500 < 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
+    # look for errors
+    i = 0
+    for res in results:
+        if (res.split()[0] < 0):
+            print("error running tcp command %s" % tcp_cmds[i])
+            subprocess.call(["cat", res.split()[2]])
+            print("error running tcp command %s" % tcp_cmds[i])
+            return None
 
-    cmd["small_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 < 1e4) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
+    output = [res for res in results\
+              if (int(res.split()[0]) >= 0 and "receiver" in res)]
+    return output
 
-    cmd["small_median"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 < 1e4) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
+def run_stats_processes(tcp_cmds, tcpCmdOutputs, stats_cmds):
+    final_output = {}
+    for i in range(0, len(tcp_cmds)):
+        tcpCmd = tcp_cmds[i]
+        tcpProc, tcpOut, tcpErr = tcpCmdOutputs[i]
+        if "receiver" in tcpCmd:
+            for size in stats_cmds:
+                cmd = stats_cmds[size]
+                statsProc, statsOut, statsErr\
+                    = run_stats(tcpProc, tcpOut, tcpErr, cmd)
+                final_output[size] = statsOut
+                if statsErr is not None:
+                    print("%s: %s"% (size, statsOut))
 
-    cmd["large_tail"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $2;}'" % (tmpFile,rtt)
+        tcpOut.close()
+        tcpErr.close()
+    return
 
-    cmd["large_median"] = "grep fct %s | sed 's/ULL//g' | awk '{ if ($10 * 1500 >= 1e6) {print $8 \" \" $10*1.2;}}' | awk '{print $1/(%f+$2);}' | Rscript -e 'quantile (as.numeric (readLines (\"stdin\")), probs=c(0.5, 0.95))' | tail -n 1 | awk '{print $1;}'" % (tmpFile,rtt)
 
-    val = {}
-    for k in cmd:
-        v = cmd[k]
-        pipedCommands = v.split("|")
-        #print pipedCommands
-        proc = subprocess.Popen(v, stdout=subprocess.PIPE, shell=True)
-        (out, err) = proc.communicate()
-        if (err is not None):
-            print ("error running " + str(cmd[k]))
-        val[k] = out
-        #print k, ": ", out
-    
-    current_rate = 10000
-    current_alg = "tcp"
-    fct_small = val["small_tail"]
-    fct_medium = val["medium_tail"]
-    fct_large = val["large_median"]
-    update_id = int(round(time.time()))
-    
-    f = open(fctFile, "w")
-    result = (",".join([str(x).rstrip() for x in [current_rate,current_alg,fct_small,fct_medium,fct_large,update_id]]))
-    print(result)
-    f.write(result)
-    f.close()
+
+# def get_sender_cmds(ip_addr_list):
+# def get_receiver_cmds(ip_addr_list):
+# def get_stats_cmds():
+# def run_tcp(cmd):
+# def run_stats(proc, input_file, input_err, cmd)
+# def run_tcp_processes(tcp_cmds):
+# def run_stats_processes(tcp_cmds, tcpCmdOutputs, stats_cmds):
+
+if __name__ == '__main__':
+    tcp_sender_cmds = get_sender_cmds([args.single_from_ip])
+    print("getting tcp sender commands: %s\n"%str(tcp_sender_cmds))
+    tcp_receiver_cmds = get_receiver_cmds([args.single_to_ip])
+    print("getting tcp receiver commands: %s\n"%str(tcp_receiver_cmds))
+    tcp_cmds = []
+
+    for cmd in tcp_receiver_cmds:
+        tcp_cmds.append(tcp_receiver_cmds[cmd])
+    for cmd in tcp_sender_cmds:
+        tcp_cmds.append(tcp_sender_cmds[cmd])
+
+    print("running tcp processes")
+    outputs = run_tcp_processes(tcp_cmds)
+
+    if outputs is not None:
+        print(outputs)
+        for o in outputs:        
+            subprocess.call(["cat", o.split()[1]])
+            print("\n\n\n")
+
+    #f = open("a.txt", "w")
+    #e = open("b.txt", "w")
+    #(sProc, sOut, sErr) = run_tcp(tcp_cmds[0])
+    #subprocess.call(["cat", sOut.name])
+    #subprocess.call(["cat", sErr.name])
+
+    #(sProc, sOut, sErr) = run_tcp(tcp_cmds[1])
+
+    # stats_cmds = get_stats_cmds()
+    # print("getting stats commands: %s\n"%str(stats_cmds))
+    # print("running stats processes")
+    # run_stats_processes(tcp_cmds, output, stats_cmds)    
