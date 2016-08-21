@@ -89,12 +89,23 @@ def run_tcp(cmd):
     ret = subprocess.call(cmd.split(), stdout=f, stderr=e)
     return "%d %s %s" % (ret, f.name, e.name)
 
-def run_stats(proc, input_file, input_err, cmd):
-    proc = subprocess.Popen(cmd,
-                            stdin = input_file,
-                            stdout= subprocess.PIPE)
-    (out, err) = proc.communicate()
-    return (proc, out, err)
+def run_stats(input_file, cmd):
+    # print("running %s on %s" % (cmd, input_file))
+    # for line in input_file:
+    #    print line
+
+    err = ""
+    out = ""
+    try:
+        out = subprocess.check_output(cmd,
+                                      stdin = input_file,
+                                      shell = True)
+    except subprocess.CalledProcessError as e:
+        err = e.output
+        out = ""
+    
+    return (out, err)
+    #return (cmd, " ")
 
 def run_tcp_processes(tcp_cmds):
     # want to run TCP senders and receivers on different cores
@@ -109,6 +120,7 @@ def run_tcp_processes(tcp_cmds):
     # look for errors
     i = 0
     for res in results:
+        # TODO(lav): sometimes no error but output file has no results
         if (res.split()[0] < 0):
             print("error running tcp command %s" % tcp_cmds[i])
             subprocess.call(["cat", res.split()[2]])
@@ -119,23 +131,20 @@ def run_tcp_processes(tcp_cmds):
               if (int(res.split()[0]) >= 0 and "receiver" in res)]
     return output
 
-def run_stats_processes(tcp_cmds, tcpCmdOutputs, stats_cmds):
-    final_output = {}
-    for i in range(0, len(tcp_cmds)):
-        tcpCmd = tcp_cmds[i]
-        tcpProc, tcpOut, tcpErr = tcpCmdOutputs[i]
-        if "receiver" in tcpCmd:
-            for size in stats_cmds:
-                cmd = stats_cmds[size]
-                statsProc, statsOut, statsErr\
-                    = run_stats(tcpProc, tcpOut, tcpErr, cmd)
-                final_output[size] = statsOut
-                if statsErr is not None:
-                    print("%s: %s"% (size, statsOut))
-
-        tcpOut.close()
-        tcpErr.close()
-    return
+def run_stats_processes(receiver_outputs, stats_cmds):
+    stats_outputs = []
+    for output in receiver_outputs:
+        kind, fName, eName = output.split()
+        fPrefix = "_".join(fName.split("_")[:2])
+        for name in stats_cmds:
+            cmd = stats_cmds[name]
+            out, err =\
+                       run_stats(open(fName, "r"), cmd)
+            out_str = "%s %s %s" % (fPrefix, name, out)
+            if len(err) > 0:
+                out_str = "%s %s %s" % (fPrefix, name, err)
+            stats_outputs.append(out_str)
+    return stats_outputs
 
 
 
@@ -176,7 +185,11 @@ if __name__ == '__main__':
 
     #(sProc, sOut, sErr) = run_tcp(tcp_cmds[1])
 
-    # stats_cmds = get_stats_cmds()
+    stats_cmds = get_stats_cmds()
+    stats_outputs = run_stats_processes(outputs, stats_cmds)
+
+    print stats_outputs
+
     # print("getting stats commands: %s\n"%str(stats_cmds))
     # print("running stats processes")
     # run_stats_processes(tcp_cmds, output, stats_cmds)    
