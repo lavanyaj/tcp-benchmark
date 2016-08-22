@@ -43,16 +43,37 @@ struct connection {
 };
 
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
-		     uint32_t id, uint64_t duration, uint16_t port_num, const char *dest,
-		     uint64_t num_flows, uint16_t src_port, const char* src_ip) {
+		     uint32_t id, uint64_t duration, uint64_t num_flows,
+		     int num_dests, char **dest_arr, uint32_t* port_num_arr,
+		     const char* src_ip, uint32_t src_port) {
 	sender->gen = gen;
 	sender->id = id;
 	sender->duration = duration;
-	sender->port_num = port_num;
-	sender->dest = dest;
+	sender->num_dests = num_dests;
+	assert(num_dests <= NUM_CORES);
+
+	for (int i = 0; i < NUM_CORES; i++) {
+	  sender->port_num_arr[i] = port_num_arr[i];
+	  sender->dest_arr[i] = dest_arr[i];
+	}
+	
+	for (int i = 0; i < NUM_CORES; i++) {
+	  if (i < num_dests) {
+	  printf("%d) %s:%u, ", i, sender->dest_arr[i], sender->port_num_arr[i]);
+	  } else {
+	    assert(sender->dest_arr[i] == NULL);
+	    assert(sender->port_num_arr[i] == 0);
+	  }
+	}
+	printf("\nsuccessfully initialized sender\n");
 	sender->num_flows = num_flows;
 	sender->src_port = src_port;
 	sender->src_ip = src_ip;
+}
+
+int choose_random_dest_index(const struct tcp_sender* sender) {
+  assert(sender->num_dests > 0);
+  return rand() / ((double) RAND_MAX) * (sender->num_dests);
 }
 
 // Selects the IP that corresponds to the receiver id
@@ -117,7 +138,7 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
 
 // Open a socket and connect (dst specified by sender).
 // Populate sock_fd with the descriptor and return the return value for connect
-int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd, int index,
+int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd, int dest_index,
 bool non_blocking) {
 	assert(sender != NULL);
 	
@@ -150,15 +171,13 @@ bool non_blocking) {
 	// Initialize destination address
 	memset(&sock_addr, 0, sizeof(sock_addr));
 	sock_addr.sin_family = AF_INET;
-	sock_addr.sin_port = htons(sender->port_num);
-	const char *ip_addr = sender->dest;
-	// Choose the IP that corresponds to a randomly chosen core router
-	//char ip_addr[12];
-	//choose_IP(outgoing.receiver, ip_addr);
-	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
-	printf("connecting to %s:%u\n", sender->dest, sender->port_num);
+	const char *ip_addr = sender->dest_arr[dest_index];
+	uint16_t port_num = sender->port_num_arr[dest_index];
+	printf("connecting to %s:%u\n", ip_addr, port_num);
+	sock_addr.sin_port = htons(port_num);
 	result = inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr);
 	assert(result > 0);
+
 
 	// Connect to the receiver
 	return connect(*sock_fd, (struct sockaddr *) &sock_addr, sizeof(sock_addr));
@@ -192,7 +211,8 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 	next_send_time = start_time + packet.time;
 
 	outgoing.sender = sender->id;
-	int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+	outgoing.dest_index = choose_random_dest_index(sender);
+	int ret = inet_pton(AF_INET, sender->dest_arr[outgoing.dest_index], &outgoing.receiver);
 	assert(ret > 0);
 	outgoing.flow_start_time = next_send_time;
 	outgoing.size = packet.size;
@@ -240,10 +260,12 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 			}
 			assert(index != -1);  // Otherwise, we have too many connections
 
-			// Connect to the receiver
-			connections[index].return_val = open_socket_and_connect(sender,
-					&connections[index].sock_fd, index,
-					true);
+			// Connect to the receiver, receiver must match outgoing
+			connections[index].return_val =
+			  open_socket_and_connect(sender,
+						  &connections[index].sock_fd,
+						  outgoing.dest_index,
+						  true);
 			if (connections[index].return_val < 0 && errno != EINPROGRESS) {
 				assert(current_time_nanoseconds() > end_time);
 				return;
@@ -261,7 +283,13 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 			next_send_time = start_time + packet.time;
 
 			outgoing.sender = sender->id;
-			int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+			outgoing.dest_index = choose_random_dest_index(sender);
+			printf("index, dest for next packet is %d %s:%d\n", \
+			       outgoing.dest_index, sender->dest_arr[outgoing.dest_index],
+			       sender->port_num_arr[outgoing.dest_index]);
+
+			int ret = inet_pton(AF_INET, sender->dest_arr[outgoing.dest_index],
+					    &outgoing.receiver);
 			assert(ret > 0);
 			outgoing.flow_start_time = next_send_time;
 			outgoing.size = packet.size;
@@ -323,55 +351,69 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 int main(int argc, char **argv) {
 	uint32_t send_duration;  // in seconds
 	uint32_t my_id;
-	uint32_t port_num = PORT;
-	char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
-	if (!dest_ip)
-		return -1;
-	char *src_ip = NULL;	
-	uint32_t src_port = 0;
-	uint32_t size_param;
-	// short-lived/interactive (0), persistent/interactive (1), or persistent/bulk (2)
 
+	uint32_t size_param;
 	uint32_t mean_t_btwn_flows = 10000;
 	uint32_t num_flows = 10000;
-	if (argc > 6) {
-		sscanf(argv[1], "%u", &send_duration);
-		sscanf(argv[2], "%u", &mean_t_btwn_flows);
-		sscanf(argv[3], "%u", &my_id);
-		sscanf(argv[4], "%s", dest_ip);
-		sscanf(argv[5], "%u", &size_param);
-		sscanf(argv[6], "%u", &num_flows);
-		if (argc > 7) {
-		  sscanf(argv[7], "%u", &port_num);
-		  if (argc > 8) {
-		    sscanf(argv[8], "%u", &src_port);
-		    if (argc > 9) {
-		      src_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
-		      if (!src_ip)
-			return -1;
-		      sscanf(argv[9], "%s", src_ip);
-		    }
-		  }
-		}
+
+	char *dest_arr[NUM_CORES];
+	uint32_t port_num_arr[NUM_CORES];
+	int num_dests = 0;
+	for (int i = 0; i < NUM_CORES; i++) {
+	  dest_arr[i] = NULL;
+	  port_num_arr[i] = 0;
 	}
-	if (argc <= 6) {
+
+	char *src_ip = NULL;	
+	uint32_t src_port = 0;
+	const char* expected[] = {"binary", "id_", "send_duration", "mean_t_btwn_flows",
+				   "size_param", "num_flows", "num_dests",
+				  "dest:port", "src:port", "...", "...", "..."};
+	for (int i = 0; i < argc; i++) {
+	  printf("arg #%d: expected %s, got %s\n", i, expected[i], argv[i]);
+	}
+	if (argc > 7) {
+	  sscanf(argv[1], "%u", &my_id);       
+	  sscanf(argv[2], "%u", &send_duration);
+	  sscanf(argv[3], "%u", &mean_t_btwn_flows);	  
+	  sscanf(argv[4], "%u", &size_param);
+	  sscanf(argv[5], "%u", &num_flows);
+
+	  sscanf(argv[6], "%u", &num_dests);
+	  int index = 0;
+	  int next_index = 7;
+	  while (index < num_dests) {
+	    dest_arr[index] = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	    if (!dest_arr[index]) return -1;		  
+	    sscanf(argv[next_index], "%[^:]:%d", dest_arr[index], &port_num_arr[index]);
+	    /* printf("scanned %s into %s and %u\n", */
+	    /* 	   argv[next_index], dest_arr[index], port_num_arr[index]); */
+	    index++; next_index++;
+	  }
+	  if (argc > next_index) {
+	    src_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	    if (!src_ip) return -1;		  
+	    sscanf(argv[next_index], "%[^:]:%u", src_ip, &src_port);
+	  }		  		
+	}
+	if (argc <= 7) {
 		printf(
-				"usage: %s send_duration_s mean_t_us my_id_0 dest_ip size_param_mtu num_flows port_num src_port src_ip (last 3 optional)\n",
-				argv[0]);
+		       "usage: %s send_duration_s mean_t_us my_id_0 size_param_mtu num_flows num_dests dest_ip:port_num+ src_ip:port\n",
+		       argv[0]);
 		return -1;
 	}
 
 	uint64_t duration = (send_duration * 1ull) * 1000 * 1000 * 1000;
-
 	mean_t_btwn_flows *= 1000; // get it in nanoseconds
 
 	// Initialize the sender
 	struct generator gen;
 	struct tcp_sender sender;
-	srand((uint32_t)(current_time_nanoseconds() + 0xDEADBEEF * my_id + 0xBABABABA * port_num));
+	srand((uint32_t)(current_time_nanoseconds() + 0xDEADBEEF * my_id + 0xBABABABA * src_port));
 	gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, size_param);
-	tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip, num_flows, src_port, src_ip);
-
+	tcp_sender_init(&sender, &gen, my_id, duration, num_flows,
+			num_dests, dest_arr, port_num_arr, src_ip, src_port);
+	
 	printf("Running interactive sender with short-lived connections\n");
 	printf("\tmy id: %u\n", my_id);
 	printf("\tduration (seconds): %u\n", send_duration);

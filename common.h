@@ -24,6 +24,7 @@ struct packet {
   uint64_t packet_send_time;
   uint32_t size;
   uint32_t id;
+  int dest_index;
 };
 
 // Get the current time in nanoseconds
