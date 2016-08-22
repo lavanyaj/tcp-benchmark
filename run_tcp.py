@@ -20,12 +20,8 @@ parser.add_argument('--tcp_benchmark_dir', type=str, default="/home/lavanyaj/tcp
 parser.add_argument('--percswitch_dir', type=str, default="/home/lavanyaj/perc_switch")
 
 # single sender and receiver set up
-parser.add_argument('--num_dests', type=int, default=1)
-parser.add_argument('--single_from_ip', type=str, default="10.0.0.1")
-parser.add_argument('--single_from_port', type=int, default=500)
-parser.add_argument('--single_to_ip', type=str, default="10.0.0.2")
-parser.add_argument('--single_to_port', type=int, default=100)
-
+parser.add_argument('--srcs', type=str, nargs='+', default=["10.0.0.1:500", "10.0.0.2:500"])
+parser.add_argument('--dests', type=str, nargs='+', default=["10.0.0.3:100", "10.0.0.4:100"])
 
 # not used yet
 parser.add_argument('--scaling', type=float, default=1.0)
@@ -33,11 +29,12 @@ parser.add_argument('--scaling', type=float, default=1.0)
 args = parser.parse_args()
 
 
-def get_sender_cmds(ip_addr_list):
+def get_sender_cmds():
     tcp_sender_cmds = {}
     tcpSender = "%s/tcp_sender"%args.tcp_benchmark_dir
     id_ = 0
-    for ip in ip_addr_list:
+    for addr in args.srcs:
+        ip, port = addr.split(":")
         # sudo /home/lavanyaj/tcp-benchmark/tcp_sender 5 10000 0 10.0.0.2 10 100 100 500 10.0.0.1
         sender_cmd = tcpSender +\
                      " " + str(id_) +\
@@ -45,20 +42,21 @@ def get_sender_cmds(ip_addr_list):
                      " " + str(args.inter_arrival_time) +\
                      " " + str(args.size) +\
                      " " + str(args.num_flows) +\
-                     " " + str(args.num_dests) +\
-                     " " + args.single_to_ip + ":" + str(args.single_to_port) +\
-                     " " + ip + ":" + str(args.single_from_port)
+                     " " + str(len(args.dests)) +\
+                     " " + " ".join(args.dests)+\
+                     " " + ip + ":" + port
         tcp_sender_cmds[ip] = ("sender", ip, sender_cmd)
         id_ = id_ + 1
 
     return tcp_sender_cmds
 
-def get_receiver_cmds(ip_addr_list):
+def get_receiver_cmds():
     tcp_receiver_cmds = {}
     tcpReceiver = "%s/tcp_receiver"%args.tcp_benchmark_dir
-    for ip in ip_addr_list:
+    for addr in args.dests:
+        ip, port = addr.split(":")
         receiver_cmd = tcpReceiver + " " + str(args.receiver_duration) +\
-                       " " + str(args.single_to_port) +\
+                       " " + port +\
                        " " + ip
         tcp_receiver_cmds[ip] = ("receiver", ip, receiver_cmd)
     return tcp_receiver_cmds
@@ -156,9 +154,14 @@ def run_stats_processes(receiver_outputs, stats_cmds):
 # def run_stats_processes(tcp_cmds, tcpCmdOutputs, stats_cmds):
 
 if __name__ == '__main__':
-    tcp_sender_cmds = get_sender_cmds([args.single_from_ip])
+    assert(len(args.srcs) <= 2)
+    assert(len(args.srcs) >= 1)
+    assert(len(args.dests) <= 2)
+    assert(len(args.dests) >= 1)
+    
+    tcp_sender_cmds = get_sender_cmds()
     print("getting tcp sender commands: %s\n"%str(tcp_sender_cmds))
-    tcp_receiver_cmds = get_receiver_cmds([args.single_to_ip])
+    tcp_receiver_cmds = get_receiver_cmds()
     print("getting tcp receiver commands: %s\n"%str(tcp_receiver_cmds))
     tcp_cmds = []
 
@@ -170,8 +173,9 @@ if __name__ == '__main__':
     print("running tcp processes")
     outputs = run_tcp_processes(tcp_cmds)
 
+    print(outputs)
     receiver_outputs = [res for res in outputs\
-              if (int(res.split()[0]) >= 0 and "receiver" in res)]
+               if (int(res.split()[0]) >= 0 and "receiver" in res)]
 
 
     stats_cmds = get_stats_cmds()
@@ -179,10 +183,10 @@ if __name__ == '__main__':
 
     print stats_outputs
 
-    for output in receiver_outputs:
-        ret, fName, errName = output.split()
-        os.remove(fName)
-        os.remove(errName)
-    # print("getting stats commands: %s\n"%str(stats_cmds))
-    # print("running stats processes")
-    # run_stats_processes(tcp_cmds, output, stats_cmds)    
+    # for output in receiver_outputs:
+    #     ret, fName, errName = output.split()
+    #     os.remove(fName)
+    #     os.remove(errName)
+    # # print("getting stats commands: %s\n"%str(stats_cmds))
+    # # print("running stats processes")
+    # # run_stats_processes(tcp_cmds, output, stats_cmds)    

@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "common.h"
-#define MAX_SENDERS 1
+#define MAX_SENDERS 2
 #define MAX_FLOW_ID 100000
 
 // Information logger per flow
