@@ -21,6 +21,7 @@ struct tcp_sender {
   uint16_t port_num_arr[NUM_CORES];
   uint64_t num_flows; // Number of flows to send
   char *dest_arr[NUM_CORES];
+  char *alias_arr[NUM_CORES];
   int num_dests;
   uint16_t src_port;
   const char *src_ip;
@@ -30,7 +31,7 @@ struct tcp_sender {
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id,
 		     uint64_t duration, uint64_t num_flows, 
 		     int num_dests, char **dest_arr, uint32_t* port_num_arr,
-		     const char* src_ip,  uint32_t src_port);
+		     const char* src_ip,  uint32_t src_port, char **alias_arr);
 
 // Runs one TCP sender with a persistent connection
 void run_tcp_sender_persistent(struct tcp_sender *sender);

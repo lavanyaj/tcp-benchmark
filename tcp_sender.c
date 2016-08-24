@@ -42,10 +42,18 @@ struct connection {
 	char *current_buffer;
 };
 
+// receiver_alias is just an empty char array
+static void get_alias(const char* sender_ip, const char* receiver_ip, char* receiver_alias) {
+  strcpy(receiver_alias,"");
+  if (strncmp(sender_ip, "10.50.0.1", IP_ADDR_MAX_LENGTH) == 0) {
+    if (strncmp(receiver_ip, "10.50.1.1", IP_ADDR_MAX_LENGTH) == 0)
+      strcpy(receiver_alias, "10.60.1.1");
+  }
+}
+
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
 		     uint32_t id, uint64_t duration, uint64_t num_flows,
-		     int num_dests, char **dest_arr, uint32_t* port_num_arr,
-		     const char* src_ip, uint32_t src_port) {
+		     int num_dests, char **dest_arr,  uint32_t* port_num_arr, const char* src_ip, uint32_t src_port, char **alias_arr) {
 	sender->gen = gen;
 	sender->id = id;
 	sender->duration = duration;
@@ -55,11 +63,12 @@ void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
 	for (int i = 0; i < NUM_CORES; i++) {
 	  sender->port_num_arr[i] = port_num_arr[i];
 	  sender->dest_arr[i] = dest_arr[i];
+	  sender->alias_arr[i] = alias_arr[i];
 	}
 	
 	for (int i = 0; i < NUM_CORES; i++) {
 	  if (i < num_dests) {
-	  printf("%d) %s:%u, ", i, sender->dest_arr[i], sender->port_num_arr[i]);
+	    printf("%d) %s:%u (%s), ", i, sender->dest_arr[i], sender->port_num_arr[i], sender->alias_arr[i]);
 	  } else {
 	    assert(sender->dest_arr[i] == NULL);
 	    assert(sender->port_num_arr[i] == 0);
@@ -171,7 +180,7 @@ bool non_blocking) {
 	// Initialize destination address
 	memset(&sock_addr, 0, sizeof(sock_addr));
 	sock_addr.sin_family = AF_INET;
-	const char *ip_addr = sender->dest_arr[dest_index];
+	const char *ip_addr = sender->alias_arr[dest_index];	
 	uint16_t port_num = sender->port_num_arr[dest_index];
 	printf("connecting to %s:%u\n", ip_addr, port_num);
 	sock_addr.sin_port = htons(port_num);
@@ -225,7 +234,7 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 		if (next_send_time > time_now)
 			time_diff = (next_send_time < end_time ? next_send_time : end_time)
 					- time_now;
-		assert(time_diff < 1000 * 1000 * 1000);
+		assert(time_diff < 2 * 1000 * 1000 * 1000);
 		ts.tv_nsec = time_diff;
 
 		// Add fds to set and compute max
@@ -326,12 +335,29 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 							outgoing_data->size, outgoing_data->flow_start_time,
 							outgoing_data->id, current_time_nanoseconds());
 				flows_sent++;
+			} else if (connections[i].status == SENDING
+				   && connections[i].return_val < connections[i].bytes_left) {
+			  // did not finish sending this flow, send some more
+			  // don't want to send all at once to be fair to other flows
+			  // not changing packet_send_time since that's start time use for flow fct
+			  connections[i].bytes_left -= connections[i].return_val;
+			  connections[i].return_val = send(connections[i].sock_fd,
+							   connections[i].buffer, connections[i].bytes_left, 0);
+			  connections[i].status = SENDING;
+			  if (DEBUG_PRINTS) {
+			    struct packet *outgoing_data =
+			      (struct packet *) connections[i].buffer;
+			    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+				   outgoing_data->sender, outgoing_data->receiver,
+				   outgoing_data->size, outgoing_data->flow_start_time,
+				   outgoing_data->id, current_time_nanoseconds());
+			  }
 			} else {
 				// check that send was succsessful
 				// if this assert fails, can implement the method for persistent
 				// connections above to resend the remainder. but this should only
 				// be a problem with really large flow sizes.
-				assert(connections[i].return_val == connections[i].bytes_left);
+			        assert(connections[i].return_val == connections[i].bytes_left);
 
 				// close socket
 				(void) shutdown(connections[i].sock_fd, SHUT_RDWR);
@@ -357,10 +383,12 @@ int main(int argc, char **argv) {
 	uint32_t num_flows = 10000;
 
 	char *dest_arr[NUM_CORES];
+	char *alias_arr[NUM_CORES];
 	uint32_t port_num_arr[NUM_CORES];
 	int num_dests = 0;
 	for (int i = 0; i < NUM_CORES; i++) {
 	  dest_arr[i] = NULL;
+	  alias_arr[i] = NULL;
 	  port_num_arr[i] = 0;
 	}
 
@@ -396,6 +424,19 @@ int main(int argc, char **argv) {
 	    sscanf(argv[next_index], "%[^:]:%u", src_ip, &src_port);
 	  }		  		
 	}
+
+	if (src_ip) {
+	  for (int i = 0; i < num_dests; i++) {
+	    // get the alias for this destination
+	    alias_arr[i] = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	    if (!alias_arr[i]) return -1;
+	    get_alias(src_ip, dest_arr[i], alias_arr[i]);
+	    assert(strcmp(alias_arr[i], "") != 0);
+	    printf("got source %s will send to alias %s instead of %s\n",
+		   src_ip, alias_arr[i], dest_arr[i]);
+	  }
+	}
+
 	if (argc <= 7) {
 		printf(
 		       "usage: %s send_duration_s mean_t_us my_id_0 size_param_mtu num_flows num_dests dest_ip:port_num+ src_ip:port\n",
@@ -410,9 +451,9 @@ int main(int argc, char **argv) {
 	struct generator gen;
 	struct tcp_sender sender;
 	srand((uint32_t)(current_time_nanoseconds() + 0xDEADBEEF * my_id + 0xBABABABA * src_port));
-	gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, size_param);
+	gen_init(&gen, POISSON, ONE_SIZE, mean_t_btwn_flows, size_param);
 	tcp_sender_init(&sender, &gen, my_id, duration, num_flows,
-			num_dests, dest_arr, port_num_arr, src_ip, src_port);
+			num_dests, dest_arr, port_num_arr, src_ip, src_port, alias_arr);
 	
 	printf("Running interactive sender with short-lived connections\n");
 	printf("\tmy id: %u\n", my_id);
