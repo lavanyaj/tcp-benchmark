@@ -13,18 +13,18 @@ parser.add_argument('--receiver_duration', type=int, help='seconds', default=10)
 parser.add_argument('--sender_duration', type=int, help='seconds', default=5)
 parser.add_argument('--inter_arrival_time', help='microseconds', type=int, default=10000)
 parser.add_argument('--size', type=int, help='MTUs', default=100)
-parser.add_argument('--num_flows', type=int, default=1000)
-
-parser.add_argument('--rtt', type=float, default=0)
-parser.add_argument('--tcp_benchmark_dir', type=str, default="/home/lavanyaj/tcp-benchmark")
-parser.add_argument('--percswitch_dir', type=str, default="/home/lavanyaj/perc_switch")
+parser.add_argument('--num_flows', type=int, help='senders send until num_flows are sent, or time runs out, whichever comes first', default=1000)
 
 # single sender and receiver set up
-parser.add_argument('--srcs', type=str, nargs='+', default=["10.0.0.1:500", "10.0.0.2:500"])
-parser.add_argument('--dests', type=str, nargs='+', default=["10.0.0.3:100", "10.0.0.4:100"])
+parser.add_argument('--srcs', type=str, nargs='+', default=["10.0.0.1:500", "10.0.0.2:500"], help='list of senders, use ip:port notation')
+parser.add_argument('--dests', type=str, nargs='+', default=["10.0.0.3:100", "10.0.0.4:100"], help='list of receivers, use ip:port notation')
 
-# not used yet
-parser.add_argument('--scaling', type=float, default=1.0)
+parser.add_argument('--tcp_benchmark_dir', type=str, help='to locate tcp_sender, receiver binaries', default="/home/lavanyaj/tcp-benchmark")
+
+# not implemented yet
+parser.add_argument('--cdfFile', type=str, help='not implemented yet', default="/dev/null")
+parser.add_argument('--scaling', type=float, help='not implemented yet', default=1.0)
+parser.add_argument('--percswitch_dir', type=str, help='not implemented yet', default="/home/lavanyaj/perc_switch")
 
 args = parser.parse_args()
 
@@ -88,20 +88,17 @@ def run_tcp(cmd):
     return "%d %s %s" % (ret, f.name, e.name)
 
 def run_stats(open_file, cmd):
-    # print("running %s on %s" % (cmd, input_file))
-    # for line in input_file:
-    #    print line
-
     err = ""
     out = ""
     try:
         out = subprocess.check_output(cmd,
                                       stdin = open_file,
                                       shell = True)
+        print("running %s on %s to get %s" % (cmd, open_file.name, out))
     except subprocess.CalledProcessError as e:
         err = e.output
         out = ""
-    
+
     return (out, err)
     #return (cmd, " ")
 
@@ -181,7 +178,8 @@ if __name__ == '__main__':
     stats_cmds = get_stats_cmds()
     stats_outputs = run_stats_processes(receiver_outputs, stats_cmds)
 
-    print stats_outputs
+    for o in stats_outputs:
+        print o
 
     # for output in receiver_outputs:
     #     ret, fName, errName = output.split()
