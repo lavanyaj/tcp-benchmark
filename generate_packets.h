@@ -5,6 +5,8 @@
  *      Author: aousterh
  */
 
+#include "ranvar.h"
+
 #include <stdint.h>
 
 #ifndef GENERATE_PACKETS_H_
@@ -16,7 +18,8 @@ enum time_distribution {
 
 enum size_distribution {
   ONE_SIZE,  // size_param is size
-  UNIFORM   // uniform in (1, size_param)
+  UNIFORM,   // uniform in (1, size_param)
+  CDF_FILE, // using EmpiricalRandomVariable initialized from CDF file
 };
 
 struct generator {
@@ -25,6 +28,7 @@ struct generator {
   uint64_t time_param;
   uint32_t size_param;
   uint64_t t_last_request;
+  EmpiricalRandomVariable erv;
 };
 
 struct gen_packet {
@@ -36,7 +40,7 @@ struct gen_packet {
 // Allows for different distributions of packet arrival time and
 // packet size
 void gen_init(struct generator *generator, enum time_distribution time_dist,
-	      enum size_distribution size_dist, uint64_t time_param,
+	      enum size_distribution size_dist, const char* cdf_filename, uint64_t time_param,
 	      uint32_t size_param);
 
 // Generate a packet

@@ -119,7 +119,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
   uint64_t interval_end_time = start_time + interval_duration;
   //receiver->log.current->start_time = start_time;
   uint64_t time_now;
-  char * buf = malloc(MAX_BUFFER_SIZE);
+  char * buf = (char *) malloc(MAX_BUFFER_SIZE);
   while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
   {
     int i;
@@ -264,7 +264,7 @@ int main(int argc, char **argv) {
       sscanf(argv[2], "%u", &port_num);  // optional port number
       printf("Got port number %u\n", port_num);
       if (argc > 3) {
-	ip_addr = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	ip_addr = (char *) malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
 	if (!ip_addr)
 	  return -1;
 	sscanf(argv[3], "%s", ip_addr);  // optional ip address

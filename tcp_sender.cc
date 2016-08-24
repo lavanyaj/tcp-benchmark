@@ -29,6 +29,8 @@
 #define MAX_BUFFER_SIZE (10000 * MTU_SIZE)
 #define NUM_CORES 4
 
+static const char DctcpCdfFile[] = "/home/lavanyaj/tcp-benchmark/DCTCP_CDF";
+
 enum state {
 	INVALID, CONNECTING, SENDING, READY
 };
@@ -283,7 +285,7 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender) {
 			}
 
 			int size_in_bytes = outgoing.size * MTU_SIZE;
-			connections[index].buffer = malloc(size_in_bytes);
+			connections[index].buffer = (char *) malloc(size_in_bytes);
 			bcopy((void *) &outgoing, connections[index].buffer,
 					sizeof(struct packet));
 
@@ -411,7 +413,7 @@ int main(int argc, char **argv) {
 	  int index = 0;
 	  int next_index = 7;
 	  while (index < num_dests) {
-	    dest_arr[index] = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	    dest_arr[index] = (char *) malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
 	    if (!dest_arr[index]) return -1;		  
 	    sscanf(argv[next_index], "%[^:]:%d", dest_arr[index], &port_num_arr[index]);
 	    /* printf("scanned %s into %s and %u\n", */
@@ -419,7 +421,7 @@ int main(int argc, char **argv) {
 	    index++; next_index++;
 	  }
 	  if (argc > next_index) {
-	    src_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	    src_ip = (char *) malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
 	    if (!src_ip) return -1;		  
 	    sscanf(argv[next_index], "%[^:]:%u", src_ip, &src_port);
 	  }		  		
@@ -428,7 +430,7 @@ int main(int argc, char **argv) {
 	if (src_ip) {
 	  for (int i = 0; i < num_dests; i++) {
 	    // get the alias for this destination
-	    alias_arr[i] = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+	    alias_arr[i] = (char *) malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
 	    if (!alias_arr[i]) return -1;
 	    get_alias(src_ip, dest_arr[i], alias_arr[i]);
 	    assert(strcmp(alias_arr[i], "") != 0);
@@ -451,7 +453,7 @@ int main(int argc, char **argv) {
 	struct generator gen;
 	struct tcp_sender sender;
 	srand((uint32_t)(current_time_nanoseconds() + 0xDEADBEEF * my_id + 0xBABABABA * src_port));
-	gen_init(&gen, POISSON, ONE_SIZE, mean_t_btwn_flows, size_param);
+	gen_init(&gen, POISSON, CDF_FILE, DctcpCdfFile, mean_t_btwn_flows, size_param);
 	tcp_sender_init(&sender, &gen, my_id, duration, num_flows,
 			num_dests, dest_arr, port_num_arr, src_ip, src_port, alias_arr);
 	
